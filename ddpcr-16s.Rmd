@@ -9,6 +9,8 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+remotes::install_github("coolbutuseless/ggpattern")
 ```
 
 # Set-up
@@ -16,6 +18,7 @@ knitr::opts_chunk$set(echo = TRUE)
 ## Libraries
 
 ```{r}
+library(ggpattern)
 library(tidyverse)
 library(readxl)
 ```
@@ -25,15 +28,22 @@ library(readxl)
 
 ```{r}
 
-ddpcr_data_file_16s <- "/Users/emily/Documents/Research/Aggregates-Meret/Data/ddPCR/EML_16s_09sep2022-manual.csv" 
+ddpcr_data_file_16s <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/EML_16s_09sep2022-manual.csv"
 
 ddpcr_data_file_mcra <- 
-  "/Users/emily/Documents/Research/Aggregates-Meret/Data/ddPCR/EML_mcrA_01sep2022-manual.csv"
+  "/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/EML_mcrA_01sep2022-manual.csv"
 
 ddpcr_data_file_glta <- 
-  "/Users/emily/Documents/Research/Aggregates-Meret/Data/ddPCR/22Oct22_gltA/AMG_glta_22oct2022_all_manual.csv"
+  "/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/gltA_Feb 27/AMG_gltA_27feb2023.csv"
+  
+ddpcr_data_file_nirk <-
+  "/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/nirk_1_12_23/AG_nirK_1_12_23.csv"
 
-ddpcr_data_file_nirk <- "/Users/emily/Documents/Research/Aggregates-Meret/Data/ddPCR/AG_nirK_1_12_23.csv"
+ddpcr_data_file_nirs <-
+"/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/nirS_2_10_23/AG_nirS_2-10-23.csv"
+
+
+ddpcr_grav_data_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/ddPCR-grav-data.xlsx"
 
 #dna_extraction_file <- 
 
@@ -47,6 +57,8 @@ ddpcr_data_file_nirk <- "/Users/emily/Documents/Research/Aggregates-Meret/Data/d
 
 reaction_volume_df <- 25 #NEED TO INCORPORATE INTO MEASUREMENTS
 
+dna_elution_volume <- 100 #uL
+
 site_colors <- c("R" = "darkgoldenrod1", "T" = "darkblue")
 
 site_names <- c("R" = "Sandy Loam", "T" = "Loam")
@@ -54,6 +66,8 @@ site_names <- c("R" = "Sandy Loam", "T" = "Loam")
 agg_names <- c("B" = "Bulk soil", "IN" = "Agg. Interior")
 
 agg_shapes <- c("B" = 15, "IN" = 17)
+
+agg_alpha <- c("B" = 1, "IN" = 0.5)
 
 
 # g_h2o = mass_g / (1 / avg_gwc + 1),
@@ -64,6 +78,49 @@ agg_shapes <- c("B" = 15, "IN" = 17)
 
 
 ```
+
+
+# Gravimetric data
+
+This code:
+
+* Imports the gravimetric data from an Excel sheet
+* Calculates moisture content of samples
+* Calculates the dry mass of soil extracted in DNA extractions
+
+```{r}
+
+grav_raw <- 
+  read_xlsx(ddpcr_grav_data_file, sheet = "Grav Data from Meret") %>% 
+  separate(Sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    across(rep, as.integer),
+    mass_water_per_g_wet_soil = `Mass Water in Soil (g)` / `Mass Wet Soil (g)`
+  ) %>% 
+  select(site, hzn, rep, mass_water_per_g_wet_soil)
+
+
+
+
+extraction_data <- 
+  read_xlsx(ddpcr_grav_data_file, sheet = "DNA Extraction") %>% 
+  separate(Sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(across(rep, as.integer)) %>% 
+  rename(mass_extract_wet_g = `Wet mass sample extracted (g)`) %>% 
+  left_join(grav_raw, by = c("site", "hzn", "rep")) %>% 
+  mutate(
+    across(bulk_agg, ~case_match(., "Bulk" ~ "B", "In" ~ "IN")),
+    mass_extract_dry_g =
+      mass_extract_wet_g - (mass_extract_wet_g * mass_water_per_g_wet_soil)
+  ) %>% 
+  select(site, hzn, rep, bulk_agg, mass_extract_dry_g)
+
+extraction_data
+
+
+```
+
+
 
 
 # 16S
@@ -97,6 +154,7 @@ ddpcr_data_16s <-
       )
   )
 
+ddpcr_data_16s
 
 ```
 
@@ -121,6 +179,7 @@ This code:
 * Subtracts the counts from the blanks 
 * Corrects for DNA template dilution
 * Corrects for reaction volume dilution (reports concentration in copies / uL DNA extract)
+* Calculates 16S copies per g
 * Takes average value for technical replicates
 
 ```{r}
@@ -155,9 +214,16 @@ data_16s_adj <-
   ) %>% 
   mutate(across(rep, as.integer)) %>% 
   group_by(site, hzn, rep, bulk_agg) %>%
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    sixteenS_copies_per_g = 
+      sixteenS_conc_adj * dna_elution_volume / mass_extract_dry_g
+  ) %>% 
   summarise(
-    across(sixteenS_conc_adj, ~mean(.))
-  )
+    across(c(sixteenS_conc_adj, sixteenS_copies_per_g), ~mean(.))
+  ) 
+
+data_16s_adj
 
 ```
 
@@ -170,7 +236,7 @@ It appears we got no positive amplification (beyond contamination) from RC1-Bulk
 
 data_16s_adj %>% 
   ggplot(
-    aes(y = hzn, x = sixteenS_conc_adj, shape = bulk_agg, color = site)
+    aes(y = hzn, x = sixteenS_copies_per_g, shape = bulk_agg, color = site)
   ) +
   geom_point(size = 3) +
   scale_y_discrete(limits = rev) + 
@@ -186,9 +252,10 @@ data_16s_adj %>%
   ) +
   theme_bw() + 
   labs(
-    x = "16S copies per uL extract",
+    x = "16S copies per g soil",
     y = "Horizon"
   )
+
 
 ```
 
@@ -198,8 +265,8 @@ data_16s_adj %>%
 data_16s_adj %>% 
   group_by(site, hzn, bulk_agg) %>% 
   summarise(
-    mean_16s = mean(sixteenS_conc_adj, na.rm = TRUE),
-    se_16s = sd(sixteenS_conc_adj) / sqrt(n())
+    mean_16s = mean(sixteenS_copies_per_g, na.rm = TRUE),
+    se_16s = sd(sixteenS_copies_per_g) / sqrt(n())
   ) %>% 
   ggplot(
     aes(y = hzn, x = mean_16s, shape = bulk_agg, color = site)
@@ -221,7 +288,7 @@ data_16s_adj %>%
   ) +
   theme_bw() + 
   labs(
-    x = "16S copies per uL extract",
+    x = "16S copies per g soil",
     y = "Horizon"
   )
 
@@ -288,7 +355,7 @@ ddpcr_data_mcra %>%
 
 ```
 
-RC1-Bulk is seemingly missing..... and the technical replicates for RA1 look horrible. Need to look at ddPCR folder. 
+RC1-Bulk is seemingly missing..... and the technical replicates for RA1 look horrible. Need to look at ddPCR folder. I would assume that RA1 was failure to generate droplets or something....
 
 For now, let's average the technical replicates
 
@@ -302,9 +369,17 @@ This code
 ddpcr_data_mcra_av <- 
   ddpcr_data_mcra %>% 
   group_by(site, hzn, rep, bulk_agg) %>%
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    mcra_copies_per_g =
+      mcra_conc * dna_elution_volume / mass_extract_dry_g
+  ) %>% 
   summarise(
-    across(mcra_conc, ~mean(.))
-  )
+    across(c(mcra_conc, mcra_copies_per_g), ~mean(.))
+  ) 
+
+ddpcr_data_mcra_av
+
 ```
 
 
@@ -316,7 +391,7 @@ ddpcr_data_mcra_av <-
 
 ddpcr_data_mcra_av %>% 
   ggplot(
-    aes(y = hzn, x = mcra_conc, shape = bulk_agg, color = site)
+    aes(y = hzn, x = mcra_copies_per_g, shape = bulk_agg, color = site)
   ) +
   geom_point(size = 3) +
   scale_y_discrete(limits = rev) + 
@@ -333,7 +408,7 @@ ddpcr_data_mcra_av %>%
   ) +
   theme_bw() + 
   labs(
-    x = "mcrA copies per uL extract",
+    x = "mcrA copies per g soil",
     y = "Horizon"
   )
 
@@ -346,8 +421,8 @@ ddpcr_data_mcra_av %>%
 ddpcr_data_mcra_av %>% 
   group_by(site, hzn, bulk_agg) %>% 
   summarize(
-    mcra_conc_av = mean(mcra_conc),
-    mcra_conc_se = sd(mcra_conc) / sqrt(n())
+    mcra_conc_av = mean(mcra_copies_per_g),
+    mcra_conc_se = sd(mcra_copies_per_g) / sqrt(n())
   ) %>% 
   ggplot(
     aes(y = hzn, x = mcra_conc_av, shape = bulk_agg, color = site)
@@ -370,7 +445,7 @@ ddpcr_data_mcra_av %>%
   ) +
   theme_bw() + 
   labs(
-    x = "mcrA copies per uL extract",
+    x = "mcrA copies per g soil",
     y = "Horizon"
   )
 ```
@@ -390,7 +465,7 @@ ddpcr_data_mcra_av %>%
   #filter(!(samp %in% c("TC1", "RA1", "TB3") & bulk_agg == "B")) %>% 
   left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
   mutate(
-    prop_mcra = mcra_conc / sixteenS_conc_adj
+    prop_mcra = mcra_copies_per_g / sixteenS_copies_per_g
   ) %>% 
   ggplot(
     aes(y = hzn, x = prop_mcra, shape = bulk_agg, color = site)
@@ -421,7 +496,7 @@ ddpcr_data_mcra_av %>%
 ddpcr_data_mcra_av %>% 
   left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
   mutate(
-    prop_mcra = mcra_conc / sixteenS_conc_adj
+    prop_mcra = mcra_copies_per_g / sixteenS_copies_per_g
   ) %>% 
   group_by(site, hzn, bulk_agg) %>% 
   summarise(
@@ -466,9 +541,207 @@ ddpcr_data_mcra_av %>%
  
 
 # gltA
+Need to incorporate the gltA data from 27Feb2023
 
-NOTE - we got like no positive amplification for gltA....probably because the droplets sat for like 8 days 
+```{r}
 
+ddpcr_data_glta <- 
+  ddpcr_data_file_glta %>% 
+  read_csv() %>% 
+  filter(str_detect(TargetType, "Ch1")) %>% 
+  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>% 
+  filter(!(samp %in% c("Water", "PositiveControl", "buffer"))) %>% 
+  mutate(dilution = as.numeric(str_extract(Sample, "(?<=:)\\d+"))) %>% 
+  select(
+    samp, 
+    bulk_agg, 
+    dilution,
+    glta_conc_unadj = Concentration,
+    glta_droplets = AcceptedDroplets,
+    glta_min = PoissonConfMin,
+    glta_max = PoissonConfMax
+  ) %>% 
+  filter(glta_droplets > 10000) %>% 
+  mutate(
+    site = str_extract(samp, ".{1}"),
+    hzn = str_extract(samp, ".{1}(?=\\d)"),
+    rep = as.integer(str_extract(samp, ".{1}$")),
+    across(c(glta_conc_unadj, dilution), as.numeric),
+    glta_conc_adj = glta_conc_unadj * dilution * reaction_volume_df,
+    across(c(glta_min, glta_max), ~. * dilution * reaction_volume_df)
+  ) 
+```
+## Inspect technical replicates
+
+```{r}
+
+ddpcr_data_glta %>% 
+  ggplot(
+    aes(x = samp, y = glta_conc_adj, color = bulk_agg)
+  ) +
+  geom_pointrange(aes(ymin = glta_min, ymax = glta_max))
+
+```
+Technical replicates look good. 
+
+```{r}
+ddpcr_data_glta_av <- 
+  ddpcr_data_glta %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    glta_copies_per_g =
+      glta_conc_adj * dna_elution_volume / mass_extract_dry_g
+  ) %>%   
+  group_by(site, hzn, rep, bulk_agg) %>%
+  summarise(
+    across(c(glta_conc_adj, glta_copies_per_g), ~mean(., na.rm = TRUE))
+  )
+
+ddpcr_data_glta_av
+
+```
+
+## Copies per g
+
+### Technical replicates averaged
+
+```{r}
+ddpcr_data_glta_av %>% 
+  ggplot(
+    aes(y = hzn, x = glta_copies_per_g, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+    scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  scale_y_discrete(limits = rev) +
+  theme_bw() + 
+  labs(
+    x = "gltA copies per g soil",
+    y = "Horizon"
+  )
+
+```
+
+
+### texture-bulk-hzn averaged
+
+```{r}
+ddpcr_data_glta_av %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarize(
+    glta_conc_av = mean(glta_copies_per_g, na.rm = TRUE),
+    glta_conc_se = sd(glta_copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = glta_conc_av, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = glta_conc_av - glta_conc_se, 
+      xmax = glta_conc_av + glta_conc_se)
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "gltA copies per g soil",
+    y = "Horizon"
+  )
+```
+
+
+## Copies per 16S copy
+
+### technical replicates averaged
+
+```{r}
+ddpcr_data_glta_av %>% 
+  left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    prop_glta = glta_copies_per_g / sixteenS_copies_per_g
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = prop_glta, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "gltA copies per 16S copy",
+    y = "Horizon"
+  )
+```
+
+
+### texture-bulk-hzn averaged
+
+```{r}
+
+ddpcr_data_glta_av %>% 
+  left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  filter(sixteenS_copies_per_g > 0) %>% 
+  mutate(
+    prop_glta = glta_copies_per_g / sixteenS_copies_per_g
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_prop_glta = mean(prop_glta, na.rm = TRUE),
+    se_prop_glta = sd(prop_glta, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_prop_glta, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_prop_glta - se_prop_glta, 
+      xmax = mean_prop_glta + se_prop_glta
+    )
+  ) + 
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "gltA copies per 16S copy",
+    y = "Horizon"
+  )
+
+```
 
 # nirK 
 
@@ -480,8 +753,6 @@ This code:
 * Corrects for reaction volume dilution (reports concentration in copies / uL DNA extract)
 
 ```{r}
-
-#nirk_df <- 10
 
 ddpcr_data_nirk <- 
   ddpcr_data_file_nirk %>% 
@@ -531,16 +802,17 @@ ddpcr_data_nirk %>%
 
 Technical replicates look good. RA2-IN is maybe a little funky, 
 
-
-
-
-
 ```{r}
 ddpcr_data_nirk_av <- 
   ddpcr_data_nirk %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    nirk_copies_per_g =
+      nirk_conc_adj * dna_elution_volume / mass_extract_dry_g
+  ) %>%   
   group_by(site, hzn, rep, bulk_agg) %>%
   summarise(
-    across(nirk_conc_adj, ~mean(.))
+    across(c(nirk_conc_adj, nirk_copies_per_g), ~mean(.))
   )
 
 
@@ -555,7 +827,7 @@ ddpcr_data_nirk_av
 ```{r}
 ddpcr_data_nirk_av %>% 
   ggplot(
-    aes(y = hzn, x = nirk_conc_adj, shape = bulk_agg, color = site)
+    aes(y = hzn, x = nirk_copies_per_g, shape = bulk_agg, color = site)
   ) +
   geom_point(size = 3) +
     scale_color_manual(
@@ -571,7 +843,7 @@ ddpcr_data_nirk_av %>%
   scale_y_discrete(limits = rev) +
   theme_bw() + 
   labs(
-    x = "nirK copies per uL extract",
+    x = "nirK copies per g soil",
     y = "Horizon"
   )
 
@@ -584,8 +856,8 @@ ddpcr_data_nirk_av %>%
 ddpcr_data_nirk_av %>% 
   group_by(site, hzn, bulk_agg) %>% 
   summarize(
-    nirk_conc_av = mean(nirk_conc_adj),
-    nirk_conc_se = sd(nirk_conc_adj) / sqrt(n())
+    nirk_conc_av = mean(nirk_copies_per_g),
+    nirk_conc_se = sd(nirk_copies_per_g) / sqrt(n())
   ) %>% 
   ggplot(
     aes(y = hzn, x = nirk_conc_av, shape = bulk_agg, color = site)
@@ -608,7 +880,7 @@ ddpcr_data_nirk_av %>%
   ) +
   theme_bw() + 
   labs(
-    x = "nirK copies per uL extract",
+    x = "nirK copies per g soil",
     y = "Horizon"
   )
 ```
@@ -627,7 +899,7 @@ ddpcr_data_nirk_av %>%
 ddpcr_data_nirk_av %>% 
   left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
   mutate(
-    prop_nirk = nirk_conc_adj / sixteenS_conc_adj
+    prop_nirk = nirk_copies_per_g / sixteenS_copies_per_g
   ) %>% 
   ggplot(
     aes(y = hzn, x = prop_nirk, shape = bulk_agg, color = site)
@@ -659,7 +931,7 @@ ddpcr_data_nirk_av %>%
 ddpcr_data_nirk_av %>% 
   left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
   mutate(
-    prop_nirk = nirk_conc_adj / sixteenS_conc_adj
+    prop_nirk = nirk_copies_per_g / sixteenS_copies_per_g
   ) %>% 
   group_by(site, hzn, bulk_agg) %>% 
   summarise(
@@ -699,4 +971,876 @@ ddpcr_data_nirk_av %>%
 * Higher relative abundance in Sandy Loam soil than Loam soil 
 * Interior of aggregates seemingly has higher relative abundance 
 * No difference between interior/exterior for Loam soils
+
+# nirS
+
+This code: 
+
+* Imports the nirS data from a CSV
+* Corrects for reaction volume dilution (reports concentration in copies / uL DNA extract)
+
+```{r}
+
+ddpcr_data_nirs <- 
+  ddpcr_data_file_nirs %>% 
+  read_csv() %>% 
+  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>% 
+  filter(!(samp %in% c("Water", "PositiveControl", "buffer"))) %>% 
+  mutate(dilution = as.numeric(str_extract(Sample, "(?<=:)\\d+"))) %>% 
+  filter(str_detect(TargetType, "Ch1")) %>% 
+  select(
+    samp, 
+    bulk_agg, 
+    dilution,
+    nirs_conc_unadj = Concentration,
+    nirs_droplets = AcceptedDroplets,
+    nirs_min = PoissonConfMin,
+    nirs_max = PoissonConfMax
+  ) %>% 
+  filter(nirs_droplets > 10000, samp != "SF") %>% 
+  mutate(
+    across(nirs_conc_unadj, ~if_else(. == "No Call", "0", .)),
+    site = str_extract(samp, ".{1}"),
+    hzn = str_extract(samp, ".{1}(?=\\d)"),
+    rep = as.integer(str_extract(samp, ".{1}$")),
+    across(c(nirs_conc_unadj, dilution), as.numeric),
+    nirs_conc_adj = nirs_conc_unadj * dilution * reaction_volume_df,
+    across(c(nirs_min, nirs_max), ~. * dilution * reaction_volume_df)
+  ) 
+
+
+ddpcr_data_nirs
+
+
+```
+
+
+## Inspect technical replicates
+
+```{r}
+
+ddpcr_data_nirs %>% 
+  filter(site == "T") %>% 
+  mutate(across(dilution, as.factor)) %>% 
+  ggplot(
+    aes(x = samp, y = nirs_conc_adj, color = bulk_agg, shape = dilution)
+  ) +
+  geom_pointrange(aes(ymin = nirs_min, ymax = nirs_max)) 
+
+```
+
+
+```{r}
+ddpcr_data_nirs %>% 
+  mutate(across(dilution, as.factor)) %>% 
+  filter(site == "R") %>% 
+  ggplot(
+    aes(x = samp, y = nirs_conc_adj, color = bulk_agg, shape = dilution)
+  ) +
+  geom_pointrange(aes(ymin = nirs_min, ymax = nirs_max)) 
+```
+
+The technical replicates are at least relatively close even compared to the dilutions. Going to retain the un-diluted samples for this run. 
+
+```{r}
+ddpcr_data_nirs_av <- 
+  ddpcr_data_nirs %>% 
+  filter(dilution != 10) %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    nirs_copies_per_g =
+      nirs_conc_adj * dna_elution_volume / mass_extract_dry_g
+  ) %>% 
+  group_by(site, hzn, rep, bulk_agg) %>%
+  summarise(
+    across(c(nirs_conc_adj, nirs_copies_per_g), ~mean(., na.rm = TRUE))
+  )
+
+
+ddpcr_data_nirs_av
+```
+
+```{r}
+ddpcr_data_nirs_av %>% 
+  ggplot(
+    aes(y = hzn, x = nirs_copies_per_g, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+    scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  scale_y_discrete(limits = rev) +
+  theme_bw() + 
+  labs(
+    x = "nirS copies per g soil",
+    y = "Horizon"
+  )
+
+```
+
+```{r}
+ddpcr_data_nirs_av %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarize(
+    nirs_conc_av = mean(nirs_copies_per_g),
+    nirs_conc_se = sd(nirs_copies_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = nirs_conc_av, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = nirs_conc_av - nirs_conc_se, 
+      xmax = nirs_conc_av + nirs_conc_se)
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "nirK copies per g soil",
+    y = "Horizon"
+  )
+```
+
+
+## Copies per 16S copy
+
+### technical replicates averaged
+
+```{r}
+ddpcr_data_nirs_av %>% 
+  left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    prop_nirs = nirs_copies_per_g / sixteenS_copies_per_g
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = prop_nirs, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "nirS copies per 16S copy",
+    y = "Horizon"
+  )
+```
+
+
+### texture-bulk-hzn averaged
+
+```{r}
+
+ddpcr_data_nirs_av %>% 
+  left_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    prop_nirs = nirs_copies_per_g / sixteenS_copies_per_g
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_prop_nirs = mean(prop_nirs, na.rm = TRUE),
+    se_prop_nirs = sd(prop_nirs) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_prop_nirs, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_prop_nirs - se_prop_nirs, 
+      xmax = mean_prop_nirs + se_prop_nirs
+    )
+  ) + 
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "nirS copies per 16S copy",
+    y = "Horizon"
+  )
+
+```
+# All Genes 
+
+## Combine data
+
+NOTE: Only 19 samples have a complete dataset for all the genes and 16S
+
+```{r}
+
+ddpcr_compiled <- 
+  ddpcr_data_nirs_av %>% 
+  full_join(ddpcr_data_nirk_av, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  full_join(ddpcr_data_glta_av, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  full_join(ddpcr_data_mcra_av, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  full_join(data_16s_adj, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    total_anaerobe_copies = 
+      nirs_copies_per_g + nirk_copies_per_g + mcra_copies_per_g + glta_copies_per_g
+  ) 
+
+
+```
+
+```{r}
+
+ddpcr_compiled %>% 
+  ggplot(
+    aes(y = hzn, x = total_anaerobe_copies, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "nirK+nirS+gltA+mcrA copies per g soil",
+    y = "Horizon"
+  )
+
+```
+
+
+```{r}
+ddpcr_compiled %>% 
+  mutate(
+    prop_anaerobe = total_anaerobe_copies / sixteenS_copies_per_g
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = prop_anaerobe, shape = bulk_agg, color = site)
+  ) +
+  geom_point(size = 3) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "(nirK+nirS+gltA+mcrA) per 16S",
+    y = "Horizon"
+  )
+```
+
+
+```{r}
+ddpcr_compiled %>% 
+  mutate(
+    prop_anaerobe = total_anaerobe_copies / sixteenS_copies_per_g
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_prop_an = mean(prop_anaerobe, na.rm = TRUE),
+    se_prop_an = sd(prop_anaerobe) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_prop_an, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_prop_an - se_prop_an, 
+      xmax = mean_prop_an + se_prop_an
+    )
+  ) + 
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    x = "(nirK+nirS+gltA+mcrA) per 16S",
+    y = "Horizon"
+  )
+
+```
+
+# Stacked Bar Charts
+
+## Copies per g soil
+
+
+```{r}
+
+ddpcr_stacked_bar_data <-
+  ddpcr_compiled %>% 
+  select(-c(contains("conc"), total_anaerobe_copies)) %>% 
+  pivot_longer(
+    cols = contains("copies_per_g"),
+    names_to = "target_gene",
+    values_to = "copies_per_g"
+  ) %>% 
+  mutate(across(target_gene, ~str_extract(.,"nirs|nirk|glta|mcra|sixteenS")))
+
+```
+
+### 16S
+
+```{r}
+ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "sixteenS") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_g = mean(copies_per_g, na.rm = TRUE),
+    se_copies_per_g = sd(copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_g,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_g, xmax = avg_copies_per_g + se_copies_per_g),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per g soil"
+  )
+```
+
+
+### nirS
+
+```{r}
+ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "nirs") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_g = mean(copies_per_g, na.rm = TRUE),
+    se_copies_per_g = sd(copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_g,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_g, xmax = avg_copies_per_g + se_copies_per_g),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per g soil"
+  )
+```
+
+### nirK
+
+```{r}
+ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "nirk") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_g = mean(copies_per_g, na.rm = TRUE),
+    se_copies_per_g = sd(copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_g,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_g, xmax = avg_copies_per_g + se_copies_per_g),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per g soil"
+  )
+```
+
+### gltA
+
+```{r}
+ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "glta") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_g = mean(copies_per_g, na.rm = TRUE),
+    se_copies_per_g = sd(copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_g,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_g, xmax = avg_copies_per_g + se_copies_per_g),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per g soil"
+  )
+```
+
+### mcrA
+
+```{r}
+ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "mcra") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_g = mean(copies_per_g, na.rm = TRUE),
+    se_copies_per_g = sd(copies_per_g, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_g,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_g, xmax = avg_copies_per_g + se_copies_per_g),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per g soil"
+  )
+```
+
+## Copies normalized to 16S
+
+
+```{r}
+
+sixteenS_abund <- 
+  ddpcr_stacked_bar_data %>% 
+  filter(target_gene == "sixteenS") %>% 
+  select(-target_gene) %>% 
+  rename(sixteenS_copies_per_g = copies_per_g)
+
+
+ddpcr_stacked_bar_prop_data <- 
+  ddpcr_stacked_bar_data %>% 
+  left_join(sixteenS_abund, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    copies_per_16S = copies_per_g / sixteenS_copies_per_g
+  )
+
+```
+
+
+
+### nirS
+
+```{r}
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene == "nirs") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_16S = mean(copies_per_16S, na.rm = TRUE),
+    se_copies_per_16S = sd(copies_per_16S, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_16S,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_16S, xmax = avg_copies_per_16S + se_copies_per_16S),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per 16S copy"
+  )
+```
+
+### nirK
+
+```{r}
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene == "nirk") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  summarise(
+    avg_copies_per_16S = mean(copies_per_16S, na.rm = TRUE),
+    se_copies_per_16S = sd(copies_per_16S, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_16S,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_16S, xmax = avg_copies_per_16S + se_copies_per_16S),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per 16S copy"
+  )
+```
+
+### gltA
+
+```{r}
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene == "glta") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  filter(copies_per_16S != Inf) %>% 
+  summarise(
+    avg_copies_per_16S = mean(copies_per_16S, na.rm = TRUE),
+    se_copies_per_16S = sd(copies_per_16S, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_16S,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_16S, xmax = avg_copies_per_16S + se_copies_per_16S),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per 16S copy"
+  )
+```
+
+### mcrA
+
+```{r}
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene == "mcra") %>% 
+  group_by(site, hzn, bulk_agg, target_gene) %>% 
+  filter(copies_per_16S != Inf) %>% 
+  summarise(
+    avg_copies_per_16S = mean(copies_per_16S, na.rm = TRUE),
+    se_copies_per_16S = sd(copies_per_16S, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  mutate(
+    site_bulk_agg = 
+      factor(
+        str_c(site, bulk_agg), 
+        levels = c("TIN", "TB", "RB", "RIN")
+      )
+  ) %>% 
+  ggplot(
+    aes(
+      x = avg_copies_per_16S,
+      y = hzn,
+      fill = site,
+      alpha = fct_rev(bulk_agg)
+    )
+  ) + 
+  geom_col(position = "dodge") + 
+  geom_errorbarh(
+    aes(xmin = avg_copies_per_16S, xmax = avg_copies_per_16S + se_copies_per_16S),
+    position = "dodge"
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_fill_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture"
+  ) +
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  labs(
+    y = "Horizon",
+    x = "Copies per 16S copy"
+  )
+```
+
+### Totals
+
+```{r}
+ddpcr_stacked_bar_prop_data
+```
+
+
+```{r}
+
+  
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene != "sixteenS") %>% 
+  ggplot(
+    aes(y = bulk_agg, x = copies_per_g, alpha = bulk_agg, fill = target_gene)
+  ) +
+  geom_col() +
+  scale_y_discrete(limits = rev) + 
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  facet_grid(cols = vars(site), rows = vars(hzn)) +
+  theme_bw() + 
+  labs(
+    x = "nirK+nirS+gltA+mcrA copies per g soil",
+    y = "Horizon"
+  )
+  
+  
+
+
+```
+
+
+```{r}
+  
+ddpcr_stacked_bar_prop_data %>% 
+  filter(target_gene != "sixteenS", copies_per_16S != Inf) %>% 
+  ggplot(
+    aes(y = bulk_agg, x = copies_per_16S, alpha = bulk_agg, fill = target_gene)
+  ) +
+  geom_col() +
+  scale_y_discrete(limits = rev) + 
+  scale_alpha_manual(
+    values = agg_alpha,
+    labels = agg_names,
+    name = NULL
+  ) +
+  facet_grid(cols = vars(site), rows = vars(hzn)) +
+  theme_bw() + 
+  labs(
+    x = "nirK+nirS+gltA+mcrA copies per 16S",
+    y = "Horizon"
+  )
+```
+
+
 
