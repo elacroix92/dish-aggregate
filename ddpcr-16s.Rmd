@@ -541,7 +541,6 @@ ddpcr_data_mcra_av %>%
  
 
 # gltA
-Need to incorporate the gltA data from 27Feb2023
 
 ```{r}
 
@@ -549,7 +548,7 @@ ddpcr_data_glta <-
   ddpcr_data_file_glta %>% 
   read_csv() %>% 
   filter(str_detect(TargetType, "Ch1")) %>% 
-  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>% 
+  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>%
   filter(!(samp %in% c("Water", "PositiveControl", "buffer"))) %>% 
   mutate(dilution = as.numeric(str_extract(Sample, "(?<=:)\\d+"))) %>% 
   select(
@@ -1009,7 +1008,6 @@ ddpcr_data_nirs <-
   ) 
 
 
-ddpcr_data_nirs
 
 
 ```

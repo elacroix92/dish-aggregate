@@ -774,14 +774,12 @@ ddpcr_data_mcra_av %>%
 
 # gltA
 
-Need to incorporate the gltA data from 27Feb2023
-
 ``` r
 ddpcr_data_glta <- 
   ddpcr_data_file_glta %>% 
   read_csv() %>% 
   filter(str_detect(TargetType, "Ch1")) %>% 
-  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>% 
+  separate(Sample, into = c("samp", "bulk_agg"), remove = FALSE) %>%
   filter(!(samp %in% c("Water", "PositiveControl", "buffer"))) %>% 
   mutate(dilution = as.numeric(str_extract(Sample, "(?<=:)\\d+"))) %>% 
   select(
@@ -1399,26 +1397,6 @@ ddpcr_data_nirs <-
 
     ## Warning: Expected 2 pieces. Missing pieces filled with `NA` in 4 rows [1, 15,
     ## 41, 55].
-
-``` r
-ddpcr_data_nirs
-```
-
-    ## # A tibble: 31 × 11
-    ##    samp  bulk_agg dilution nirs_conc…¹ nirs_…² nirs_…³ nirs_…⁴ site  hzn     rep
-    ##    <chr> <chr>       <dbl>       <dbl>   <dbl>   <dbl>   <dbl> <chr> <chr> <int>
-    ##  1 RB1   B               1         2.1   12838    35      77.5 R     B         1
-    ##  2 TB1   B               1        36.4   11483   815    1005   T     B         1
-    ##  3 RA1   B               1        15.4   13942   328.    440   R     A         1
-    ##  4 TA1   B               1       247     12429  5925    6425   T     A         1
-    ##  5 RA1   B               1        15.6   12552   330     447.  R     A         1
-    ##  6 RB3   B               1         2.8   13681    47.5    95   R     B         3
-    ##  7 TA2   B               1       196     11164  4675    5150   T     A         2
-    ##  8 TB3   B               1        41.1   12660   932.   1125   T     B         3
-    ##  9 RA2   B               1         2.2   13187    37.5    80   R     A         2
-    ## 10 RB1   IN              1         2.2   14410    37.5    80   R     B         1
-    ## # … with 21 more rows, 1 more variable: nirs_conc_adj <dbl>, and abbreviated
-    ## #   variable names ¹​nirs_conc_unadj, ²​nirs_droplets, ³​nirs_min, ⁴​nirs_max
 
 ## Inspect technical replicates
 
