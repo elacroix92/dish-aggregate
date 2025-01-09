@@ -54,9 +54,9 @@ sample_key_file_nirs <- "mcrA nirS plate prep.xlsx"
 
 sample_key_file_mcra <- "mcra-plate-map-Huy-APR2024.xlsx"
 
-ddpcr_grav_data_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/ddPCR-grav-data.xlsx"
+ddpcr_grav_data_file <- "ddPCR-grav-data.xlsx"
 
-write_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/compiled_ddpcr.csv"
+write_file <- "compiled_ddpcr.csv"
 ```
 
 ## Constants
