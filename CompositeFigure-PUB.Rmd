@@ -1,0 +1,2033 @@
+---
+title: "CompositeFigure"
+author: "Emily Lacroix"
+date: "2025-JAN-09"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Set-up
+
+## Libraries
+```{r echo=TRUE, results ='hide', warning=FALSE, message=FALSE}
+library(ggpattern)
+library(tidyverse)
+library(outliers)
+library(cowplot)
+library(readxl)
+library(car)
+
+```
+
+
+## Figure Theme
+```{r}
+
+my_theme <- function(base_size = 10, base_family = ""){ ## Control base font face and size. use `rel()` for relative font size.
+  theme_bw(base_size = base_size, base_family = base_family) %+replace%
+    theme(
+      strip.text = element_text(size = 10, face = "bold"),
+      axis.text = element_text(size = 10),
+      axis.text.x = element_text(size = 10),
+      axis.title = element_text(size = 12),
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 12),
+      strip.background = element_rect(fill = "transparent"),
+
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      aspect.ratio = 1.5
+    )
+}
+
+```
+
+
+## Files
+
+```{r eval=FALSE}
+
+ea_analysis_file <- "TCTN_data_raw.xlsx"
+
+electro_iron_file <- 
+  "UPDATED-240722_MER_MEO_Aggregates_003.xlsx"
+
+ddpcr_data_file_16s <- "EML_16s_09sep2022-manual.csv"
+
+ddpcr_data_file_nirK <- "ASH_nirk_MANUAL.csv"
+
+ddpcr_data_file_nirS <- "ASH_nirS.manual.integration.csv"
+
+ddpcr_data_file_mcrA <- "KRH_mcrA_04032024-manualthreshold.csv"
+
+sample_key_file_nirk <- "nirK plate map 6_22_23 ASH.xlsx"
+
+sample_key_file_nirs <- "mcrA nirS plate prep.xlsx"
+
+sample_key_file_mcra <- "mcra-plate-map-Huy-APR2024.xlsx"
+
+ddpcr_grav_data_file <- "ddPCR-grav-data.xlsx"
+
+write_file_electro_data <- "compiled_fe_edc_eac_v2.csv"
+
+
+```
+
+
+```{r eval=TRUE, echo=FALSE}
+ea_analysis_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/TCTN_data_raw.xlsx"
+
+electro_iron_file <- 
+  "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/UPDATED-240722_MER_MEO_Aggregates_003.xlsx"
+
+ddpcr_data_file_16s <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Aggregates (copied from GDrive)/ddPCR/Data/EML_16s_09sep2022-manual.csv"
+
+ddpcr_data_file_nirK <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/ASH_nirk_MANUAL.csv"
+
+ddpcr_data_file_nirS <- 
+"/Users/elacroi3/Documents/Research/Aggregate-dish/Data/ASH_nirS.manual.integration.csv"
+
+ddpcr_data_file_mcrA <- 
+    "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/KRH_mcrA_04032024-manualthreshold.csv"
+
+sample_key_file_nirk <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/nirK plate map 6_22_23 ASH.xlsx"
+
+sample_key_file_nirs <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/mcrA nirS plate prep.xlsx"
+
+sample_key_file_mcra <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/mcra-plate-map-Huy-APR2024.xlsx"
+
+ddpcr_grav_data_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/ddPCR-grav-data.xlsx"
+
+write_file_electro_data <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/Compilation/compiled_fe_edc_eac_v2.csv"
+
+```
+
+
+## Constants
+```{r}
+reaction_volume_df <- 25 
+
+dna_elution_volume <- 100 #uL
+
+site_colors <- c("R" = "darkgoldenrod1", "T" = "darkblue")
+
+site_names <- c("R" = "Sandy Loam", "T" = "Loam")
+
+agg_names <- c("B" = "Bulk soil", "IN" = "Agg. Interior")
+
+agg_shapes <- c("Bulk" = 19, "In" = 2)
+
+molar_mass_fe <- 55.845
+
+```
+
+
+# TC and TN Data
+
+## Data Import
+
+```{r}
+tctn_data <- 
+  ea_analysis_file %>% 
+  read_xlsx(skip = 5) %>% 
+  select(
+    date = `...1`,
+    sample = `...2`,
+    perc_n = `...7`,
+    perc_c = `...8`
+  ) %>% 
+  filter(str_detect(sample, "-")) %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_perc_c = mean(perc_c),
+    se_perc_c = sd(perc_c) / sqrt(n()),
+    mean_perc_n = mean(perc_n),
+    se_perc_n = sd(perc_n) / sqrt(n())
+  ) %>% 
+  ungroup() %>% 
+  mutate(
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  )
+
+
+```
+
+## Total Carbon
+```{r}
+
+tc_plot <- 
+  tctn_data %>% 
+  ggplot(
+    aes(y = hzn, x = mean_perc_c, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_perc_c - se_perc_c, 
+      xmax = mean_perc_c + se_perc_c),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  labs(
+    x = "% Organic C",
+    y = NULL,
+    shape = "Sample"
+  )
+
+
+```
+
+### Statistics
+
+Check normality - All normal
+```{r}
+
+ea_analysis_file %>% 
+  read_xlsx(skip = 5) %>% 
+  select(
+    date = `...1`,
+    sample = `...2`,
+    perc_n = `...7`,
+    perc_c = `...8`
+  ) %>% 
+  filter(str_detect(sample, "-")) %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  group_by(site, bulk_agg, hzn) %>% 
+  summarise(
+    normality = shapiro.test(perc_c)$p.value
+  )
+
+```
+T-test
+
+Sandy Loam - A Horizon
+
+```{r}
+
+tc_stat_data_a <- 
+  ea_analysis_file %>% 
+  read_xlsx(skip = 5) %>% 
+  select(
+    date = `...1`,
+    sample = `...2`,
+    perc_n = `...7`,
+    perc_c = `...8`
+  ) %>% 
+  filter(str_detect(sample, "-")) %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  filter(site == "R", hzn == "A")
+
+t.test(
+  x = tc_stat_data_a %>% filter(bulk_agg == "In") %>% pull(perc_c),
+  y = tc_stat_data_a %>% filter(bulk_agg == "Bulk") %>% pull(perc_c),
+  var.equal = FALSE
+)
+
+```
+
+Sandy Loam - B Horizon
+
+```{r}
+
+tc_stat_data_b <- 
+  ea_analysis_file %>% 
+  read_xlsx(skip = 5) %>% 
+  select(
+    date = `...1`,
+    sample = `...2`,
+    perc_n = `...7`,
+    perc_c = `...8`
+  ) %>% 
+  filter(str_detect(sample, "-")) %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  filter(site == "R", hzn == "B")
+
+t.test(
+  x = tc_stat_data_b %>% filter(bulk_agg == "In") %>% pull(perc_c),
+  y = tc_stat_data_b %>% filter(bulk_agg == "Bulk") %>% pull(perc_c),
+  var.equal = FALSE
+)
+
+```
+
+
+# Electrochemical Data
+
+## Data Import
+```{r}
+
+electro_data <- 
+  electro_iron_file %>% 
+  read_xlsx(sheet = "Compilation") %>% 
+  select(
+    sample = Sample,
+    fe_ii_umol_per_g = `Fe(II) (µmol (g dry soil)-1)`,
+    fe_tot_xrf_ug_g = `Fe (µg/g)`,
+    edc_umol_g_soil = `EDC (µmol (g dry soil)-1) m2`,
+    eac_umol_g_soil = `EAC (µmol (g dry soil)-1)`
+  ) %>%
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    eac_to_eec = eac_umol_g_soil / (eac_umol_g_soil + edc_umol_g_soil),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) 
+
+
+#electro_data %>% write_csv(file = write_file_electro_data)
+electro_data
+
+```
+
+
+```{r}
+
+mn_data <- 
+  electro_iron_file %>% 
+  read_xlsx(sheet = "XRF", skip = 1) %>% 
+  select(
+    sample = Element,
+    mn = `Mn...101`,
+  ) %>% 
+  filter(sample != "Dimension") %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    across(mn, as.numeric),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) 
+  
+mn_data
+
+```
+
+
+
+
+## EDC 
+
+### Test for outliers 
+
+```{r}
+
+electro_data %>% 
+  pull(edc_umol_g_soil) %>% 
+  grubbs.test()
+
+
+```
+
+```{r}
+
+mean_edc_no_outlier <- 
+  electro_data %>% 
+  filter(edc_umol_g_soil < 10) %>% 
+  summarise(
+    mean_edc = mean(edc_umol_g_soil)
+  ) %>% 
+  pull(mean_edc)
+
+edc_sandy_c_mean <- 
+  electro_data %>% 
+  filter(
+    edc_umol_g_soil < 10,
+    hzn == "C",
+    site == "R"
+  ) %>% 
+  summarise(
+    mean_edc = mean(edc_umol_g_soil)
+  ) %>% 
+  pull(mean_edc)
+
+edc_outlier <- 
+  electro_data %>% 
+  filter(edc_umol_g_soil > 10) %>% 
+  pull(edc_umol_g_soil)
+
+edc_outlier / edc_sandy_c_mean
+  
+```
+
+
+
+```{r}
+
+edc_plot <- 
+electro_data %>% 
+  filter(edc_umol_g_soil < 10) %>% # remove outlier
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_edc = mean(edc_umol_g_soil),
+    se_edc = sd(edc_umol_g_soil) / sqrt(n()),
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_edc, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_edc - se_edc, 
+      xmax = mean_edc + se_edc),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  labs(
+    x = expression(paste(EDC~`(`,mu,mol~g^`-1`~soil,`)`)),
+    y = element_blank(),
+    shape = "Sample"
+  )
+
+edc_plot
+
+```
+### Statistics
+
+Sandy Loam, A Horizon
+```{r}
+
+electro_data %>% 
+  filter(site == "R", hzn == "1") %>% 
+  group_by(bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(edc_umol_g_soil)$p.value
+  )
+
+
+```
+
+```{r}
+
+t.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(edc_umol_g_soil),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(edc_umol_g_soil),
+  var.equal = FALSE
+)
+
+```
+
+
+
+## EAC to EEC
+```{r}
+eac_to_eec_plot <- 
+  electro_data %>% 
+  filter(edc_umol_g_soil < 10) %>%
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_eac_to_eec = mean(eac_to_eec),
+    se_eac_to_eec = sd(eac_to_eec) / sqrt(n())
+  ) %>%  
+  ggplot(
+    aes(y = hzn, x = mean_eac_to_eec, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_eac_to_eec - se_eac_to_eec, 
+      xmax = mean_eac_to_eec + se_eac_to_eec),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_x_reverse() + #NOTE REVERSE AXIS
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  labs(
+    x = "EAC/EEC",
+    y = element_blank(),
+    shape = "Sample"
+  )
+
+
+eac_to_eec_plot
+
+
+```
+
+### Statistics
+
+Sandy Loam, A Horizon
+```{r}
+
+electro_data %>% 
+  filter(site == "R", hzn == "1") %>% 
+  group_by(bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(eac_to_eec)$p.value
+  )
+
+
+```
+
+```{r}
+
+t.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(eac_to_eec),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(eac_to_eec),
+  var.equal = FALSE
+)
+
+```
+
+# ddPCR 
+
+## Gravimetric data
+
+This code:
+
+* Imports the gravimetric data from an Excel sheet
+* Calculates moisture content of samples
+* Calculates the dry mass of soil extracted in DNA extractions
+
+```{r}
+
+grav_raw <- 
+  read_xlsx(ddpcr_grav_data_file, sheet = "Grav Data from Meret") %>% 
+  separate(Sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    across(rep, as.integer),
+    mass_water_per_g_wet_soil = `Mass Water in Soil (g)` / `Mass Wet Soil (g)`,
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) %>% 
+  select(site, hzn, rep, mass_water_per_g_wet_soil)
+
+
+
+extraction_data <- 
+  read_xlsx(ddpcr_grav_data_file, sheet = "DNA Extraction") %>% 
+  separate(Sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    across(rep, as.integer),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) %>% 
+  rename(mass_extract_wet_g = `Wet mass sample extracted (g)`) %>% 
+  left_join(grav_raw, by = c("site", "hzn", "rep")) %>% 
+  mutate(
+    across(bulk_agg, ~case_match(., "Bulk" ~ "B", "In" ~ "IN")),
+    mass_extract_dry_g =
+      mass_extract_wet_g - (mass_extract_wet_g * mass_water_per_g_wet_soil)
+  ) %>% 
+  select(site, hzn, rep, bulk_agg, mass_extract_dry_g)
+
+
+```
+
+
+```{r}
+
+
+grav_raw %>% 
+  mutate(
+    dry_soil = 1 - mass_water_per_g_wet_soil,
+    grav_moist_content = mass_water_per_g_wet_soil / dry_soil
+
+  ) %>% 
+  group_by(site, hzn) %>% 
+  summarize(
+    moist_av = mean(grav_moist_content),
+    moist_se = sd(grav_moist_content) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = moist_av, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = moist_av - moist_se, 
+      xmax = moist_av + moist_se),
+    size = 1
+  ) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.text.x = element_text(size = 16),
+    axis.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18),
+  ) +
+  labs(
+    x = "Gravimetric Water Content",
+    y = NULL,
+    shape = "Sample"
+  )
+
+```
+
+## WFPS
+
+```{r}
+
+bds <-
+  tibble(
+    site = c("T", "T", "T", "R", "R"),
+    hzn = c("1", "2", "3", "1", "2"),
+    bd = c(1.67, 1.48, 1.40, 1.30, 1.35)
+  )
+
+particle_density <- 2.65
+
+grav_raw %>% 
+  mutate(
+    dry_soil = 1 - mass_water_per_g_wet_soil,
+    grav_moist_content = mass_water_per_g_wet_soil / dry_soil
+  ) %>% 
+  left_join(bds, by = c("site", "hzn")) %>% 
+  mutate(
+    porosity = 1 - (bd / particle_density),
+    vol_water = grav_moist_content * bd,
+    wfps = vol_water / porosity
+  ) %>% 
+  group_by(site, hzn) %>% 
+  summarize(
+    wfps_av = mean(wfps),
+    wfps_se = sd(wfps) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = wfps_av, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = wfps_av - wfps_se, 
+      xmax = wfps_av + wfps_se),
+    size = 1
+  ) +
+  scale_x_continuous(
+    labels = scales::percent_format(accuracy = 1)
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  theme(
+    strip.text = element_text(size = 16, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.text.x = element_text(size = 14),
+    axis.title = element_text(size = 18),
+    legend.text = element_text(size = 16),
+    legend.title = element_text(size = 18),
+  ) +
+  labs(
+    x = "WFPS",
+    y = NULL,
+    shape = "Sample"
+  )
+
+
+```
+
+
+## 16S
+
+NOTE this data is from 2022 (When Emily ran it)
+
+This code: 
+
+* Imports the 16S data from a CSV
+
+```{r}
+
+sixteenS_df <- 1000 
+
+ddpcr_data_16s <- 
+  ddpcr_data_file_16s %>% 
+  read_csv() %>% 
+  separate(Sample, into = c("samp", "bulk_agg", "dilution")) %>% 
+  select(
+    samp, 
+    bulk_agg, 
+    dilution,
+    sixteenS_conc = Concentration,
+    sixteenS_min = PoissonConfMin,
+    sixteenS_max = PoissonConfMax,
+    droplets = AcceptedDroplets
+  ) %>% 
+  filter(
+    !(
+      is.na(dilution) & 
+        samp %in% c("RA3", "RB1", "RB2", "RB3") & 
+        bulk_agg == "IN"
+      )
+  )
+
+ddpcr_data_16s
+
+```
+
+
+## Adjust conc
+
+This code: 
+
+* Subtracts the counts from the blanks 
+* Corrects for DNA template dilution
+* Corrects for reaction volume dilution (reports concentration in copies / uL DNA extract)
+* Calculates 16S copies per g
+* Takes average value for technical replicates
+
+```{r}
+blank_16s <- 
+  ddpcr_data_16s %>% 
+  filter(samp == "TE" | samp == "Water") %>% 
+  summarise(mean_blank_16s = mean(sixteenS_conc)) %>% 
+  pull(mean_blank_16s)
+
+
+data_16s_adj <- 
+  ddpcr_data_16s %>% 
+  filter(samp != "TE" & samp != "Water") %>% 
+  mutate(
+    blank = blank_16s,
+    sixteenS_conc_minus_blank =
+      case_when(
+        dilution == "1" ~ (sixteenS_conc / 10) - blank,
+        TRUE ~ sixteenS_conc - blank
+      ),
+    across(sixteenS_conc_minus_blank, ~ if_else(. < 0, 0, .)),
+    sixteenS_conc_adj = 
+      #already accounts for 100 vs. 1000 dilution
+      sixteenS_conc_minus_blank * sixteenS_df * reaction_volume_df, 
+    site = str_extract(samp, ".{1}"),
+    hzn = str_extract(samp, ".{1}(?=\\d)"),
+    rep = str_extract(samp, ".{1}$"),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) %>% 
+  select(
+    site, hzn, rep, bulk_agg, sixteenS_conc_adj, 
+    sixteenS_droplets = droplets
+  ) %>% 
+  mutate(across(rep, as.integer)) %>% 
+  group_by(site, hzn, rep, bulk_agg) %>%
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    sixteenS_copies_per_g = 
+      sixteenS_conc_adj * dna_elution_volume / mass_extract_dry_g
+  ) %>% 
+  summarise(
+    across(c(sixteenS_conc_adj, sixteenS_copies_per_g), ~mean(.))
+  ) 
+
+data_16s_adj
+
+```
+
+
+# nirK
+
+This code:
+
+* Imports the nirK data from Alex
+* Joins the well data with the sample identity
+* filters out over-saturated samples
+
+```{r}
+nirk_sample_key <-
+  sample_key_file_nirk %>% 
+  read_xlsx(sheet = "Sample Key") %>% 
+  rename(sample_name = Sample)
+
+nirk_samples_to_filter_out <- c("RA1-B", "RA2-B", "RA3-B")
+
+nirk_data <-
+  ddpcr_data_file_nirK %>% 
+  read_csv() %>% 
+  inner_join(nirk_sample_key, by = "Well") %>% 
+  select(
+    sample_name,
+    well = Well,
+    copies_per_ul = `Conc(copies/µL)`,
+    copies_per_ul_min = PoissonConfMin,
+    copies_per_ul_max = PoissonConfMax,
+    droplets = `Accepted Droplets`
+  ) %>% 
+  filter(
+    !(sample_name %in% nirk_samples_to_filter_out),
+    droplets > 10000,
+    sample_name != "Water"
+  ) %>% 
+  separate(sample_name, into = c("samp", "bulk_agg", "dilution")) %>% 
+  mutate(
+    across(
+      dilution, 
+           ~case_when(
+             . == "1" ~ 10,
+             is.na(.) ~ 1
+             )
+      ),
+    across(c(copies_per_ul, copies_per_ul_min, copies_per_ul_max),
+           ~if_else(dilution == "1", . * dilution, . * dilution)
+             )
+  ) %>% 
+  separate_wider_position(samp, c(site = 1, hzn = 1, rep = 1)) %>% 
+  mutate(
+    across(rep, as.integer),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    copies_per_g = copies_per_ul * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_min = 
+      copies_per_ul_min * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_max = 
+      copies_per_ul_max * dna_elution_volume / mass_extract_dry_g,
+  )
+
+
+
+```
+
+```{r}
+nirk_data_av <- 
+  nirk_data %>% 
+  group_by(site, hzn, rep, bulk_agg) %>% 
+  summarise(
+    across(
+      c(
+        copies_per_ul, 
+        copies_per_ul_min, 
+        copies_per_ul_max, 
+        mass_extract_dry_g, 
+        copies_per_g,
+        copies_per_g_min,
+        copies_per_g_max
+      ),
+      ~mean(.)
+    )
+  )
+```
+
+
+
+### Horizon Averages
+
+```{r}
+
+nirk_abs_plot <-
+nirk_data_av %>% 
+  mutate(
+    across(
+      bulk_agg, ~case_match(., "B" ~ "Bulk", "IN" ~ "In")
+    )
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarize(
+    nirk_conc_av = mean(copies_per_g),
+    nirk_conc_se = sd(copies_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = nirk_conc_av, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = nirk_conc_av - nirk_conc_se, 
+      xmax = nirk_conc_av + nirk_conc_se),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  labs(
+    x = expression(paste(nirK~copies~g^`-1`~soil)),
+    y = NULL,
+    shape = "Sample"
+  )
+
+
+nirk_abs_plot
+```
+
+### Statistics
+
+```{r}
+nirk_data_av %>% 
+  filter(site == "R", hzn == "2") %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(copies_per_g)$p.value
+  )
+# cannot find transformation that works 
+
+
+```
+```{r}
+wilcox.test(
+  x = nirk_data_av %>% 
+  filter(site == "R", hzn == "2", bulk_agg == "B") %>% 
+  pull(copies_per_g),
+  y = nirk_data_av %>% 
+  filter(site == "R", hzn == "2", bulk_agg == "IN") %>% 
+  pull(copies_per_g)
+)
+```
+
+
+
+```{r}
+nirk_data_av %>% 
+  filter(site == "R", hzn == "2", bulk_agg == "B") %>% 
+  pull(copies_per_g)
+```
+
+
+
+# nirS
+
+```{r}
+nirs_sample_key <-
+  sample_key_file_nirs %>% 
+  read_xlsx(sheet = "Sample Key") %>% 
+  rename(sample_name = Sample)
+
+
+nirs_data <-
+  ddpcr_data_file_nirS %>% 
+  read_csv() %>% 
+  inner_join(nirs_sample_key, by = "Well") %>% 
+  select(
+    sample_name,
+    well = Well,
+    copies_per_ul = `Conc(copies/µL)`,
+    copies_per_ul_min = PoissonConfMin,
+    copies_per_ul_max = PoissonConfMax,
+    droplets = `Accepted Droplets`
+  ) %>% 
+    filter(
+      !(well == "D07"),
+      droplets > 10000,
+      sample_name != "Water"
+    ) %>% 
+    separate(sample_name, into = c("samp", "bulk_agg", "dilution")) %>% 
+    mutate(
+      across(
+        dilution, 
+        ~case_when(
+          . == "1" ~ 10,
+          is.na(.) ~ 1
+        )
+      ),
+      across(c(copies_per_ul, copies_per_ul_min, copies_per_ul_max),
+             ~if_else(dilution == "1", . * dilution, . * dilution)
+      ),
+      across(c(copies_per_ul, copies_per_ul_min, copies_per_ul_max),
+             ~if_else(copies_per_ul < 0.5, 0, .)
+      )
+    ) %>% 
+  filter(dilution == 1) %>% 
+  separate_wider_position(samp, c(site = 1, hzn = 1, rep = 1)) %>% 
+  mutate(
+    across(rep, as.integer),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    )
+  ) %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    copies_per_g = copies_per_ul * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_min = 
+      copies_per_ul_min * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_max = 
+      copies_per_ul_max * dna_elution_volume / mass_extract_dry_g,
+  )
+    
+  
+```
+
+
+
+### Horizon Averaged
+
+```{r}
+
+nirs_abs_plot <- 
+nirs_data %>% 
+  mutate(
+    across(
+      bulk_agg, ~case_match(., "B" ~ "Bulk", "IN" ~ "In")
+    )
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarize(
+    nirs_conc_av = mean(copies_per_g),
+    nirs_conc_se = sd(copies_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = nirs_conc_av, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = nirs_conc_av - nirs_conc_se, 
+      xmax = nirs_conc_av + nirs_conc_se),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_x_continuous(
+    labels = scales::label_scientific(),
+    n.breaks = 3
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  labs(
+    x = expression(paste(nirS~copies~g^`-1`~soil)),
+    y = NULL
+  )
+
+nirs_abs_plot
+```
+
+### Statistics
+
+```{r}
+nirs_data %>% 
+  filter(site == "R", hzn == "1") %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(copies_per_g)$p.value
+  )
+
+nirs_data %>% 
+  filter(site == "T", hzn == "2") %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(copies_per_g)$p.value
+  )
+
+
+```
+```{r}
+t.test(
+  x = 
+    nirs_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "B") %>% 
+    pull(copies_per_g),
+  y = 
+    nirs_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "IN") %>% 
+    pull(copies_per_g),
+  var.equal = FALSE
+)
+```
+
+
+
+```{r}
+t.test(
+  x = 
+    nirs_data %>% 
+    filter(site == "T", hzn == "2", bulk_agg == "B") %>% 
+    pull(copies_per_g),
+  y = 
+    nirs_data %>% 
+    filter(site == "T", hzn == "2", bulk_agg == "IN") %>% 
+    pull(copies_per_g),
+  var.equal = FALSE
+)
+```
+
+
+
+# mcrA
+
+```{r}
+
+mcra_sample_key <-
+  sample_key_file_mcra %>% 
+  read_xlsx() %>% 
+  rename(sample_name = Sample)
+
+
+mcrA_data <-
+  ddpcr_data_file_mcrA %>% 
+  read_csv() %>% 
+  inner_join(mcra_sample_key, by = "Well") %>% 
+ select(
+    sample_name,
+    well = Well,
+    copies_per_ul = `Conc(copies/µL)`,
+    copies_per_ul_min = PoissonConfMin,
+    copies_per_ul_max = PoissonConfMax,
+    droplets = `Accepted Droplets`
+  ) %>% 
+    filter(
+
+      droplets > 10000,
+      sample_name != "Water",
+      sample_name != "Positive"
+    ) %>% 
+    separate(sample_name, into = c("samp", "bulk_agg")) %>% 
+  separate_wider_position(samp, c(site = 1, hzn = 1, rep = 1)) %>% 
+  mutate(
+    across(rep, as.integer),
+    across(
+      hzn, 
+      ~case_when(
+        . == "A" ~ "1",
+        . == "B" ~ "2", 
+        . == "C" ~ "3"
+      )
+    ),
+    across(c(copies_per_ul, copies_per_ul_min, copies_per_ul_max), as.numeric),
+    across(
+      c(copies_per_ul, copies_per_ul_min, copies_per_ul_max), 
+      ~if_else(. < 0.5, 0, .)
+    ) 
+  ) %>% 
+  left_join(extraction_data, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(
+    copies_per_g = copies_per_ul * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_min = 
+      copies_per_ul_min * dna_elution_volume / mass_extract_dry_g,
+    copies_per_g_max = 
+      copies_per_ul_max * dna_elution_volume / mass_extract_dry_g,
+  )
+    
+
+
+```
+
+Average technical replicates:
+
+
+```{r}
+mcra_data_av <- 
+  mcrA_data %>% 
+  group_by(site, hzn, rep, bulk_agg) %>% 
+  summarise(
+    across(
+      c(
+        copies_per_ul, 
+        copies_per_ul_min, 
+        copies_per_ul_max, 
+        mass_extract_dry_g, 
+        copies_per_g,
+        copies_per_g_min,
+        copies_per_g_max
+      ),
+      ~mean(.)
+    )
+  )
+
+mcra_data_av
+```
+
+
+```{r}
+
+mcra_abs_plot <- 
+mcra_data_av %>% 
+  mutate(
+    across(
+      bulk_agg, ~case_match(., "B" ~ "Bulk", "IN" ~ "In")
+    )
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarize(
+    mcra_conc_av = mean(copies_per_g),
+    mcra_conc_se = sd(copies_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mcra_conc_av, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mcra_conc_av - mcra_conc_se, 
+      xmax = mcra_conc_av + mcra_conc_se),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) + 
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    guide = FALSE
+  ) +
+  scale_x_continuous(labels = scales::label_scientific()) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    name = "Texture",
+    guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() + 
+  labs(
+    x = expression(paste(mcrA~copies~g^`-1`~soil)),
+    y = NULL
+  )
+
+
+mcra_abs_plot
+
+```
+
+### Statistics
+```{r}
+mcra_data_av %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  filter(hzn != "3") %>% 
+  summarise(
+    norm = shapiro.test(copies_per_g)$p.value
+  )
+```
+
+R-2-In is NOT normal. The rest are OK for t-tests.
+
+```{r}
+
+t.test(
+  x = mcra_data_av %>% 
+  filter(site == "R", hzn == "1", bulk_agg == "B") %>% 
+  pull(copies_per_g),
+  y = mcra_data_av %>% 
+  filter(site == "R", hzn == "1", bulk_agg == "IN") %>% 
+  pull(copies_per_g),
+  var.equal = FALSE
+)
+
+
+
+```
+
+
+```{r}
+wilcox.test(
+    x = mcra_data_av %>% 
+      filter(site == "R", hzn == "2", bulk_agg == "B") %>% 
+      pull(copies_per_g),
+    y = mcra_data_av %>% 
+      filter(site == "R", hzn == "2", bulk_agg == "IN") %>% 
+      pull(copies_per_g)
+  )
+  
+
+```
+
+```{r}
+
+t.test(
+  x = mcra_data_av %>% 
+  filter(site == "T", hzn == "2", bulk_agg == "B") %>% 
+  pull(copies_per_g),
+  y = mcra_data_av %>% 
+  filter(site == "T", hzn == "2", bulk_agg == "IN") %>% 
+  pull(copies_per_g),
+  var.equal = FALSE
+)
+```
+
+
+# Composite - Figure 1
+
+
+```{r}
+
+plot_grid(
+  tc_plot, 
+  edc_plot, 
+  eac_to_eec_plot,
+  nirk_abs_plot, 
+  nirs_abs_plot, 
+  mcra_abs_plot, 
+  ncol = 3
+)
+
+
+```
+
+# Supplementary Figures
+
+## Fe 2+
+```{r}
+
+fe_ii_plot <- 
+electro_data %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_fe_ii = mean(fe_ii_umol_per_g),
+    se_fe_ii = sd(fe_ii_umol_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_fe_ii, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_fe_ii - se_fe_ii, 
+      xmax = mean_fe_ii + se_fe_ii),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    #guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    #name = "Texture",
+    #guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  
+  labs(
+    x = expression(paste(`0.5M`~HCl,`-`,extractable~Fe,`(II)`~`(`,mu,mol~g^`-1`~soil,`)`)),
+    y = element_blank(),
+    color = NULL
+  )
+
+fe_ii_plot
+
+```
+
+### Statistics
+
+```{r}
+
+electro_data %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(fe_ii_umol_per_g)$p.value
+  )
+
+```
+R & A
+
+```{r}
+
+var.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(fe_ii_umol_per_g),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(fe_ii_umol_per_g)
+  )
+
+```
+Equal variances
+
+
+```{r}
+
+t.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(fe_ii_umol_per_g),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(fe_ii_umol_per_g),
+  var.equal = TRUE
+)
+```
+
+
+T & A
+```{r}
+var.test(
+  x = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(fe_ii_umol_per_g),
+  y = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "In") %>% 
+    pull(fe_ii_umol_per_g)
+  )
+
+```
+```{r}
+
+t.test(
+  x = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(fe_ii_umol_per_g),
+  y = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "In") %>% 
+    pull(fe_ii_umol_per_g),
+  var.equal = TRUE
+)
+```
+## Total Fe (XRF)
+
+```{r}
+fe_tot_plot <- 
+electro_data %>% 
+  group_by(site, hzn, bulk_agg) %>%
+  summarise(
+    mean_fe = mean(fe_tot_xrf_ug_g),
+    se_fe = sd(fe_tot_xrf_ug_g) / sqrt(n())
+  ) %>% 
+  filter(bulk_agg == "Bulk") %>% 
+  ggplot(
+    aes(y = hzn, x = mean_fe, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_fe - se_fe, 
+      xmax = mean_fe + se_fe),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    #guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    #name = "Texture",
+    #guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  
+  labs(
+    x = expression(paste(Total~Fe~`(`,mu,g~g^`-1`~soil,`)`)),
+    y = element_blank(),
+    color = NULL
+  )
+
+
+fe_tot_plot
+
+
+```
+
+## Acid-extractable Fe(II) normalized to Total Fe (XRF)
+```{r}
+electro_data %>% 
+  mutate(
+    fe_tot_umol_per_g = fe_tot_xrf_ug_g / molar_mass_fe,
+    prop_fe_ii = fe_ii_umol_per_g / fe_tot_umol_per_g
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_prop_fe_ii = mean(prop_fe_ii),
+    se_prop_fe_ii = sd(prop_fe_ii) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_prop_fe_ii, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_prop_fe_ii - se_prop_fe_ii, 
+      xmax = mean_prop_fe_ii + se_prop_fe_ii),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    #guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    #name = "Texture",
+    #guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  labs(
+    x = expression(paste(mu,mol~Fe,`(II)`~per~mu,mol~Fe[XRF])),
+    y = element_blank(),
+    color = NULL
+  )
+
+```
+
+
+
+
+## Total Mn (XRF)
+
+```{r}
+
+
+mn_tot_plot <- 
+mn_data %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_mn = mean(mn, na.rm = TRUE),
+    se_mn = sd(mn, na.rm = TRUE) / sqrt(n())
+  ) %>% 
+  filter(bulk_agg == "Bulk") %>% 
+  ggplot(
+    aes(y = hzn, x = mean_mn, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_mn - se_mn, 
+      xmax = mean_mn + se_mn),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    #guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    #name = "Texture",
+    #guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  
+  labs(
+    x = expression(paste(Total~Mn~`(`,mu,g~g^`-1`~soil,`)`)),
+    y = element_blank(),
+    color = NULL
+  )
+
+
+mn_tot_plot
+
+
+```
+
+
+
+
+
+## 16S 
+
+```{r}
+data_16s_adj %>% 
+  mutate(
+    across(
+      bulk_agg, ~case_match(., "B" ~ "Bulk", "IN" ~ "In")
+    )
+  ) %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_16s = mean(sixteenS_copies_per_g, na.rm = TRUE),
+    se_16s = sd(sixteenS_copies_per_g) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = mean_16s, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(xmin = mean_16s - se_16s, xmax = mean_16s + se_16s),
+    fatten = 4
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  labs(
+    x = "16S copies per g soil",
+    y = "Horizon",
+    color = NULL
+  )
+
+```
+
+### Statistics
+
+```{r}
+data_16s_adj %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(sixteenS_copies_per_g)$p.value
+  )
+```
+
+R & A - Variances unequal
+```{r}
+var.test(
+  x = data_16s_adj %>% 
+    filter(site == "R", hzn =="1", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "R", hzn =="1", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g)
+)
+```
+
+```{r}
+t.test(
+  x = data_16s_adj %>% 
+    filter(site == "R", hzn =="1", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "R", hzn =="1", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g),
+  var.equal = FALSE
+)
+```
+
+
+R & B
+
+```{r}
+var.test(
+  x = data_16s_adj %>% 
+    filter(site == "R", hzn =="2", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "R", hzn =="2", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g)
+)
+```
+
+```{r}
+t.test(
+  x = data_16s_adj %>% 
+    filter(site == "R", hzn =="2", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "R", hzn =="2", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g),
+  var.equal = TRUE
+)
+```
+
+
+
+T & A
+
+```{r}
+var.test(
+  x = data_16s_adj %>% 
+    filter(site == "T", hzn =="1", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "T", hzn =="1", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g)
+)
+```
+
+```{r}
+t.test(
+  x = data_16s_adj %>% 
+    filter(site == "T", hzn =="1", bulk_agg == "B") %>% 
+    pull(sixteenS_copies_per_g),
+  y = data_16s_adj %>% 
+    filter(site == "T", hzn =="1", bulk_agg == "IN") %>% 
+    pull(sixteenS_copies_per_g),
+  var.equal = TRUE
+)
+```
+
+
+
+## Total Nitrogen
+```{r}
+
+tctn_data %>% 
+ ggplot(
+    aes(y = hzn, x = mean_perc_n, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_perc_n - se_perc_n, 
+      xmax = mean_perc_n + se_perc_n),
+    size = 0.5
+  ) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL,
+    #guide = FALSE
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+    #name = "Texture",
+    #guide = FALSE
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  labs(
+    x = "% N",
+    y = NULL, 
+    shape = "Sample",
+    color = NULL
+  )
+
+
+```
+
+
+
+## EAC
+
+```{r}
+
+electro_data %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    mean_eac = mean(eac_umol_g_soil),
+    se_eac = sd(eac_umol_g_soil) / sqrt(n())
+  ) %>%  
+  ggplot(
+    aes(y = hzn, x = mean_eac, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = mean_eac - se_eac, 
+      xmax = mean_eac + se_eac),
+    size = 0.5
+  ) +
+  scale_y_discrete(limits = rev) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  scale_x_continuous(n.breaks = 4) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x", 
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  labs(
+    x = expression(paste(EAC~`(`,mu,mol~g^`-1`~soil,`)`)),
+    y = element_blank(),
+    color = NULL
+  )
+
+```
+
+### Statistics
+```{r}
+
+electro_data %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(eac_umol_g_soil)$p.value
+  )
+
+```
+R & A
+
+```{r}
+
+var.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(eac_umol_g_soil),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(eac_umol_g_soil)
+  )
+
+```
+
+```{r}
+t.test(
+  x = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(eac_umol_g_soil),
+  y = electro_data %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(eac_umol_g_soil),
+  var.equal = TRUE
+  )
+```
+
+
+T & A
+
+```{r}
+
+var.test(
+  x = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(eac_umol_g_soil),
+  y = electro_data %>% 
+    filter(site == "T", hzn == "1", bulk_agg == "In") %>% 
+    pull(eac_umol_g_soil)
+  )
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

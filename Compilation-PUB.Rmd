@@ -1,0 +1,765 @@
+---
+title: "Compilation"
+author: "Emily Lacroix"
+date: "2025-JAN-09"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This script:
+
+* combines all data (see `CompositeFigure.Rmd` and `ddPCR-allgenes.Rmd` for source of electro and ddPCR csv's, respectively)
+* perform a PCA on all of the rough indicators for reducing conditions 
+* see if this metric for reducing conditions correlates with anything/varies predictably by depth or position 
+
+# Set-up
+
+## Libraries
+
+```{r echo=TRUE, results ='hide', warning=FALSE, message=FALSE}
+library(ggpattern)
+library(ggfortify)
+library(ggrepel)
+library(corrplot)
+library(outliers)
+library(tidyverse)
+library(readxl)
+library(car)
+
+```
+
+## Files
+
+```{r eval=FALSE}
+
+fe_edc_eac_file <- "compiled_fe_edc_eac_v2.csv"
+
+ddpcr_file <- "compiled_ddpcr.csv"
+
+ea_analysis_file <- "TCTN_data_raw.xlsx"
+
+```
+
+
+```{r eval=TRUE, echo=FALSE}
+
+fe_edc_eac_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/Compilation/compiled_fe_edc_eac_v2.csv"
+
+ddpcr_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/Compilation/compiled_ddpcr.csv"
+
+ea_analysis_file <- "/Users/elacroi3/Documents/Research/Aggregate-dish/Data/TCTN_data_raw.xlsx"
+
+```
+
+
+## Constants
+
+```{r}
+site_colors <- c("R" = "darkgoldenrod1", "T" = "darkblue")
+
+site_names <- c("R" = "Sandy Loam", "T" = "Loam")
+
+agg_names <- c("B" = "Bulk soil", "IN" = "Agg. Interior")
+
+agg_shapes <- c("Bulk" = 19, "In" = 2)
+
+agg_alpha <- c("B" = 1, "IN" = 0.5)
+
+```
+
+## Figure Theme
+```{r}
+my_theme <- function(base_size = 10, base_family = ""){ ## Control base font face and size. use `rel()` for relative font size.
+  theme_bw(base_size = base_size, base_family = base_family) %+replace%
+    theme(
+      strip.text = element_text(size = 10, face = "bold"),
+      axis.text = element_text(size = 10),
+      axis.text.x = element_text(size = 10),
+      axis.title = element_text(size = 12),
+      legend.text = element_text(size = 10),
+      legend.title = element_text(size = 12),
+      strip.background = element_rect(fill = "transparent"),
+
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      aspect.ratio = 1.5
+    )
+}
+```
+
+## Import and Combine
+
+```{r warning=FALSE, message=FALSE}
+
+electro_fe <- fe_edc_eac_file %>% read_csv()
+
+tc_tn <-
+  ea_analysis_file %>% 
+  read_xlsx(skip = 5) %>% 
+  select(
+    date = `...1`,
+    sample = `...2`,
+    perc_n = `...7`,
+    perc_c = `...8`
+  ) %>% 
+  filter(str_detect(sample, "-")) %>% 
+  separate(sample, into = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  mutate(across(rep, as.numeric))
+
+
+
+ddpcr <- ddpcr_file %>% read_csv()
+
+
+all_data <- 
+  electro_fe %>% 
+  left_join(tc_tn, by = c("site", "hzn", "rep", "bulk_agg")) %>% 
+  left_join(
+    ddpcr %>% 
+      mutate(across(bulk_agg, ~ if_else(. == "B", "Bulk", "In"))), 
+    by = c("site", "hzn", "rep", "bulk_agg")
+  )
+
+
+```
+
+# PCA
+
+## Check normality and outliers
+
+We want to perform a PCA on all of our indicators for anoxic conditions, including:
+
+* `eac_to_eec` 
+* `nirk_copies_per_g`
+* `nirs_copies_per_g`
+* `mcra_copies_per_g`
+
+Thus, we need to transform these data to be normal and then remove outliers. 
+
+### EAC to EEC
+
+#### Before transformation
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = eac_to_eec)) + 
+  geom_histogram()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec
+  ) %>% 
+  pull(trans_eac_to_eec) %>% 
+  grubbs.test()
+
+```
+
+#### Transformation 
+
+Remove outlier
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec
+  ) %>% 
+  filter(trans_eac_to_eec > 0.85) %>% # this is from the high EDC value
+  pull(trans_eac_to_eec) %>% 
+  grubbs.test()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec
+  ) %>% 
+  filter(trans_eac_to_eec > 0.85) %>% 
+  ggplot(aes(x = trans_eac_to_eec)) +
+  geom_histogram()
+
+```
+
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec
+  ) %>% 
+  filter(trans_eac_to_eec > 0.85) %>% 
+  pull(trans_eac_to_eec) %>% 
+  shapiro.test()
+
+```
+Transformation: Raise to the power of 200
+
+```{r}
+
+all_data %>% 
+  filter(eac_to_eec > 0.85) %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec^200
+  ) %>% 
+  ggplot(aes(x = trans_eac_to_eec)) +
+  geom_histogram()
+
+
+```
+
+```{r}
+
+all_data %>% 
+  filter(eac_to_eec > 0.85) %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec^200  
+  ) %>% 
+  pull(trans_eac_to_eec) %>% 
+  shapiro.test()
+
+```
+
+
+
+```{r}
+
+all_data %>% 
+  filter(eac_to_eec > 0.85) %>% 
+  mutate(
+    trans_eac_to_eec = eac_to_eec^200  
+  ) %>% 
+  pull(trans_eac_to_eec) %>% 
+  grubbs.test()
+
+```
+
+### nirK per g soil
+
+#### Before transformation
+
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = nirk_copies_per_g)) + 
+  geom_histogram()
+
+```
+
+#### Transformation
+
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = nirk_copies_per_g^(1/3))) + 
+  geom_histogram()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_nirk = nirk_copies_per_g^(1/3)
+  ) %>% 
+  pull(trans_nirk) %>% 
+  shapiro.test()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_nirk = nirk_copies_per_g^(1/3)
+  ) %>% 
+  pull(trans_nirk) %>% 
+  grubbs.test()
+
+```
+
+### nirS per g soil
+
+#### Before transformation
+
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = nirs_copies_per_g)) + 
+  geom_histogram()
+
+```
+
+#### Transformation
+
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = nirs_copies_per_g^(1/3))) + 
+  geom_histogram()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_nirs = nirs_copies_per_g^(1/3)
+  ) %>% 
+  pull(trans_nirs) %>% 
+  shapiro.test()
+
+```
+
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_nirs = nirs_copies_per_g^(1/3)
+  ) %>% 
+  pull(trans_nirs) %>% 
+  grubbs.test()
+
+```
+
+### mcrA per g soil 
+
+#### Before transformation
+
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = mcra_copies_per_g)) + 
+  geom_histogram()
+
+```
+
+#### Transformation
+
+Find lowest non-zero value:
+
+```{r}
+all_data %>% 
+  filter(mcra_copies_per_g > 0) %>% 
+  pull(mcra_copies_per_g) %>% 
+  min()
+
+```
+
+Transformation: log10(mcra + 0.5 * lowest non-zero value) 
+```{r}
+
+all_data %>% 
+  ggplot(aes(x = log10(mcra_copies_per_g + 200))) + 
+  geom_histogram()
+
+```
+
+```{r}
+all_data %>% 
+  mutate(
+    trans_mcra = log10(mcra_copies_per_g + 200)
+  ) %>% 
+  pull(trans_mcra) %>% 
+  shapiro.test()
+
+```
+
+```{r}
+
+all_data %>% 
+  mutate(
+    trans_nirs = log10(mcra_copies_per_g + 200)
+  ) %>% 
+  pull(trans_nirs) %>% 
+  grubbs.test()
+
+```
+
+## Create tibble for PCA
+
+The PCA must transform these variables accordingly: 
+
+* `eac_to_eec` 
+    + Remove outlier by retaining values > 0.85
+    + Raise to the power of 200
+* `nirk_copies_per_g`
+    + Cube root
+* `nirs_copies_per_g`
+    + Cube root
+* `mcra_copies_per_g`
+    + log10(mcra + 200)
+
+```{r}
+
+pca_tibble <- 
+  all_data %>% 
+  filter(eac_to_eec > 0.85) %>% # this completely drops the observation
+  mutate(
+    trans_eac_to_eec = eac_to_eec^200,
+    trans_nirk = nirk_copies_per_g^(1/3),
+    trans_nirs = nirs_copies_per_g^(1/3),
+    trans_mcra = log10(mcra_copies_per_g + 200)
+  ) %>% 
+  drop_na() %>% 
+  mutate(
+    across(
+      hzn, 
+      ~case_when(
+        . == "C" ~ "3",
+        . == "B" ~ "2",
+        . == "A" ~ "1" 
+      )
+    ) 
+  ) 
+
+```
+
+```{r}
+pca_microsites <- 
+  prcomp(
+    ~trans_eac_to_eec + trans_nirk + trans_nirs + trans_mcra, 
+    data = pca_tibble, 
+    scale = TRUE
+  )
+
+```
+
+
+```{r}
+
+autoplot(
+  pca_microsites,
+  loadings = TRUE,
+  loadings.label = FALSE,
+  data = pca_tibble,
+  color = "site",
+  shape = "bulk_agg",
+  size = 6
+) +
+  geom_text(
+    mapping = aes(label = hzn, color = site),
+    size = 5,
+    data = . %>%  filter(bulk_agg == "In")
+  ) +
+  geom_text(
+    mapping = aes(label = hzn),
+    size = 5,
+    color = "white",
+    data = . %>%  filter(bulk_agg == "Bulk")
+  ) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) + 
+  theme_bw() + 
+  theme(
+    aspect.ratio = 1,
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    panel.grid = element_blank()
+  ) + 
+  labs(
+    shape = NULL,
+    color = NULL
+  )
+
+
+```
+
+
+# Relationships between PC1 and Soil Properties
+
+```{r}
+
+pc1 <- 
+  pca_microsites$x %>% 
+  as_tibble() %>% 
+  pull(PC1)
+
+pca1_tibble <- 
+  pca_tibble %>% 
+  add_column(pc1) 
+
+```
+
+
+## Soil C Content 
+
+### Linear Model
+
+```{r}
+
+pc1_vs_soilC <- lm(pc1 ~ perc_c, data = pca1_tibble)
+
+pc1_vs_soilC %>% summary()
+
+```
+
+
+### Figure
+
+```{r}
+pca1_tibble %>% 
+  ggplot(aes(x = perc_c, y = pc1)) + 
+  geom_smooth(method = "lm", se = FALSE, color = "gray", linetype = 2) + 
+  geom_point(
+    aes(
+      shape = bulk_agg,
+      color = site
+    ),
+    size = 5
+  ) + 
+geom_text(
+  mapping = aes(label = hzn, color = site),
+  size = 4,
+  data = . %>%  filter(bulk_agg == "In")
+) +
+geom_text(
+  mapping = aes(label = hzn),
+  size = 4,
+  color = "white",
+  data = . %>%  filter(bulk_agg == "Bulk")
+) +
+
+scale_color_manual(
+  values = site_colors,
+  labels = site_names
+) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  theme_bw() + 
+  theme(
+    aspect.ratio = 1,
+    axis.title = element_text(size = 16),
+    axis.text = element_text(size = 14),
+    legend.text = element_text(size = 14)
+  ) + 
+  labs(
+    y = "PC1",
+    x = "% Organic C",
+    shape = NULL,
+    color = NULL
+  )
+
+```
+
+## Site Position
+
+```{r}
+
+pca1_tibble %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    avg_pc1 = mean(pc1),
+    se_pc1 = sd(pc1) / sqrt(n())
+  ) %>% 
+  ggplot(
+    aes(y = hzn, x = avg_pc1, shape = bulk_agg, color = site)
+  ) +
+  geom_pointrange(
+    aes(
+      xmin = avg_pc1 - se_pc1, 
+      xmax = avg_pc1 + se_pc1),
+    size = 0.8
+  ) +
+  scale_x_reverse() + # NOTE REVERSE AXIS!!
+  scale_y_discrete(limits = rev) +
+  scale_color_manual(
+    values = site_colors,
+    labels = site_names,
+  ) +
+  scale_shape_manual(
+    values = agg_shapes,
+    labels = agg_names,
+    name = NULL
+  ) +
+  facet_grid(
+    cols = vars(site), 
+    scales = "free_x",
+    labeller = labeller(site = site_names)
+  ) +
+  my_theme() +
+  theme(
+      strip.text = element_text(size = 12, face = "bold"),
+      axis.text = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title = element_text(size = 14),
+      legend.text = element_text(size = 12),
+      legend.title = element_text(size = 14),
+  ) +
+  labs(
+    x = "PC1",
+    y = "Horizon",
+    color = NULL
+  )
+
+```
+
+### Statistics
+
+```{r}
+
+pca1_tibble %>% 
+  filter(hzn != "3", site == "R") %>% 
+  group_by(site, hzn, bulk_agg) %>% 
+  summarise(
+    norm = shapiro.test(pc1)$p.value
+  )
+
+```
+
+Sandy Loam & Hzn 1
+```{r}
+var.test(
+  x = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(pc1),
+  y = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(pc1)
+)
+```
+
+```{r}
+t.test(
+  x = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "Bulk") %>% 
+    pull(pc1),
+  y = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "1", bulk_agg == "In") %>% 
+    pull(pc1),
+  var.equal = TRUE
+)
+```
+
+
+Sandy Loam & Horizon 2
+
+```{r}
+var.test(
+  x = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "2", bulk_agg == "Bulk") %>% 
+    pull(pc1),
+  y = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "2", bulk_agg == "In") %>% 
+    pull(pc1)
+)
+```
+
+
+```{r}
+t.test(
+  x = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "2", bulk_agg == "Bulk") %>% 
+    pull(pc1),
+  y = 
+    pca1_tibble %>% 
+    filter(site == "R", hzn == "2", bulk_agg == "In") %>% 
+    pull(pc1),
+  var.equal = TRUE
+)
+```
+
+
+# Basic Correlations
+
+Shows that %Carbon is most closely linked with PC1, rather than other indicators
+
+
+```{r}
+cor_test_tibble <- 
+  pca1_tibble %>% 
+  filter(sixteenS_copies_per_g > 0) %>% 
+  filter(eac_to_eec > 0.85) %>% # remove giant outlier from EAC to EEC 
+  select(
+    fe_ii_umol_per_g,
+    edc_umol_g_soil,
+    eac_umol_g_soil,
+    eac_to_eec,
+    perc_n,
+    perc_c,
+    sixteenS_copies_per_g,
+    nirk_copies_per_g,
+    nirs_copies_per_g,
+    mcra_copies_per_g,
+    pc1
+  ) %>% 
+  rename(
+    `Fe(II)` = fe_ii_umol_per_g,
+    EAC = eac_umol_g_soil,
+    EDC = edc_umol_g_soil,
+    `EAC / EEC` = eac_to_eec,
+    `% C` = perc_c,
+    `% N` = perc_n,
+    `16S` = sixteenS_copies_per_g,
+    nirK = nirk_copies_per_g,
+    nirS = nirs_copies_per_g,
+    mcrA = mcra_copies_per_g,
+    PC1 = pc1
+  )
+
+correlation_matrix <- 
+  cor_test_tibble %>% cor(use = "pairwise.complete.obs", method = "spearman")
+
+correlation_p_values <- cor_test_tibble %>% cor.mtest()
+```
+
+
+```{r}
+
+# 
+# cor_plot_path =   "[INSERT PATH NAME]"
+# 
+# png(height=1800, width=1800, file=cor_plot_path, type="quartz")
+
+# Your function to plot image goes here
+corrplot(
+    correlation_matrix, 
+    type = "upper", 
+    p.mat = correlation_p_values$p,
+    sig.level = 0.05,
+    order = "hclust",
+    insig = "blank",
+    method = "number",
+    number.cex = 3,
+    cl.cex = 3,
+    tl.cex = 3
+  )
+
+#dev.off()
+
+
+```
+
+
+
+
+
+
